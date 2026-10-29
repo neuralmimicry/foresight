@@ -1,0 +1,58 @@
+name: Rust quality and immutable images
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04, arch: amd64}
+          - {runner: ubuntu-24.04-arm, arch: arm64}
+    runs-on: ${{ matrix.runner }}
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Fetch the private shared kernel with a read-only deploy key
+        env:
+          VERITY_READ_KEY: ${{ secrets.VERITY_READ_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          curl --fail --silent --show-error https://api.github.com/meta |
+            jq -r '.ssh_keys[] | "github.com " + .' > ~/.ssh/known_hosts
+          printf '%s\n' "$VERITY_READ_KEY" > ~/.ssh/verity_read
+          chmod 600 ~/.ssh/verity_read
+          printf 'Host github.com\n  IdentityFile ~/.ssh/verity_read\n  IdentitiesOnly yes\n' > ~/.ssh/config
+
+      - name: Install the locked Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+      - name: Formatting, static checks and tests
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
+      - name: Build the architecture-native runtime
+        run: |
+          cargo build --release --locked
+          install -D target/release/foresight dist/foresight
+          docker build --file Containerfile --build-arg SOURCE_REVISION="$GITHUB_SHA" --tag "ghcr.io/neuralmimicry/foresight:$GITHUB_SHA-${{ matrix.arch }}" .
+      - name: Publish immutable source-revision image
+        if: github.event_name != 'pull_request'
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "ghcr.io/neuralmimicry/foresight:$GITHUB_SHA-${{ matrix.arch }}"
+          docker image inspect "ghcr.io/neuralmimicry/foresight:$GITHUB_SHA-${{ matrix.arch }}" --format '{{json .RepoDigests}}'
+

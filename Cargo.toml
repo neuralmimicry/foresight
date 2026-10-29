@@ -1,0 +1,13 @@
+[package]
+name = "foresight"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Typed business numerical tasks over Gail qualification and inference"
+[dependencies]
+nm-workflow-core = { git = "ssh://git@github.com/neuralmimicry/verity.git", rev = "de12ae8679095086282704d3a4741012a77b15a0" }
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+
